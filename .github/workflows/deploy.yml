@@ -1,0 +1,259 @@
+name: CI/CD — AI Log Analyzer
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  PYTHON_VERSION: "3.12"
+  AWS_REGION: "ap-south-1"
+  LAMBDA_FUNCTION_NAME: "ai-log-analyzer"
+
+jobs:
+  # ── Lint ───────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff check
+        run: ruff check src/ tests/
+
+      - name: Run ruff format check
+        run: ruff format --check src/ tests/
+
+  # ── Test ───────────────────────────────────────────────────────────────────
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements-dev.txt') }}
+
+      - name: Install dev dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests with coverage
+        run: |
+          pytest tests/ \
+            --tb=short \
+            --cov=src \
+            --cov-report=term-missing \
+            --cov-fail-under=80 \
+            -v
+
+  # ── Build artifacts ────────────────────────────────────────────────────────
+  build:
+    name: Build Lambda Artifacts
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Build Lambda Layer (dependencies)
+        run: |
+          mkdir -p layer/python
+          pip install -r requirements.txt -t layer/python --no-deps --upgrade
+          cd layer && zip -r ../layer.zip python/
+          echo "Layer size: $(du -sh ../layer.zip | cut -f1)"
+
+      - name: Build Lambda Function package
+        run: |
+          zip -r function.zip src/ --exclude "*.pyc" --exclude "*/__pycache__/*"
+          echo "Function size: $(du -sh function.zip | cut -f1)"
+
+      - name: Upload Layer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-layer
+          path: layer.zip
+          retention-days: 1
+
+      - name: Upload Function artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-function
+          path: function.zip
+          retention-days: 1
+
+  # ── Terraform Plan ─────────────────────────────────────────────────────────
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-layer
+      - uses: actions/download-artifact@v4
+        with:
+          name: lambda-function
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.7"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: terraform
+        run: |
+          terraform plan \
+            -var="tf_state_bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -out=tfplan \
+            -no-color
+        env:
+          TF_VAR_aws_region: ${{ env.AWS_REGION }}
+
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: terraform/tfplan
+          retention-days: 1
+
+  # ── Terraform Apply ────────────────────────────────────────────────────────
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-layer
+      - uses: actions/download-artifact@v4
+        with:
+          name: lambda-function
+      - uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: terraform/
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.7"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform Apply
+        working-directory: terraform
+        run: terraform apply -auto-approve tfplan
+
+      - name: Update Lambda environment (Telegram Chat ID)
+        run: |
+          aws lambda update-function-configuration \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --environment "Variables={
+              CLAUDE_API_KEY_SSM_PATH=/${{ env.ENVIRONMENT }}/ai-log-analyzer/claude-api-key,
+              TELEGRAM_BOT_TOKEN_SSM_PATH=/${{ env.ENVIRONMENT }}/ai-log-analyzer/telegram-bot-token,
+              SLACK_WEBHOOK_URL_SSM_PATH=/${{ env.ENVIRONMENT }}/ai-log-analyzer/slack-webhook-url,
+              TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }},
+              AWS_REGION=${{ env.AWS_REGION }},
+              LOG_LEVEL=INFO,
+              ENVIRONMENT=${{ env.ENVIRONMENT }}
+            }"
+        env:
+          ENVIRONMENT: production
+
+      - name: Populate SSM secrets
+        run: |
+          aws ssm put-parameter \
+            --name "/production/ai-log-analyzer/claude-api-key" \
+            --value "${{ secrets.CLAUDE_API_KEY }}" \
+            --type SecureString \
+            --overwrite
+
+          aws ssm put-parameter \
+            --name "/production/ai-log-analyzer/telegram-bot-token" \
+            --value "${{ secrets.TELEGRAM_BOT_TOKEN }}" \
+            --type SecureString \
+            --overwrite
+
+          aws ssm put-parameter \
+            --name "/production/ai-log-analyzer/slack-webhook-url" \
+            --value "${{ secrets.SLACK_WEBHOOK_URL }}" \
+            --type SecureString \
+            --overwrite
+
+  # ── Notify deployment ──────────────────────────────────────────────────────
+  notify-deploy:
+    name: Notify Deployment
+    runs-on: ubuntu-latest
+    needs: terraform-apply
+    if: always() && (needs.terraform-apply.result == 'success' || needs.terraform-apply.result == 'failure')
+    steps:
+      - name: Send Telegram deployment notification
+        run: |
+          STATUS="${{ needs.terraform-apply.result }}"
+          if [ "$STATUS" = "success" ]; then
+            EMOJI="✅"
+            MSG="Deployment SUCCEEDED"
+          else
+            EMOJI="❌"
+            MSG="Deployment FAILED"
+          fi
+
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"chat_id\": \"${{ secrets.TELEGRAM_CHAT_ID }}\",
+              \"text\": \"${EMOJI} <b>AI Log Analyzer — ${MSG}</b>\\n\\n<b>Branch:</b> ${{ github.ref_name }}\\n<b>Commit:</b> <code>${{ github.sha }}</code>\\n<b>Author:</b> ${{ github.actor }}\\n<b>Run:</b> ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\",
+              \"parse_mode\": \"HTML\"
+            }"
