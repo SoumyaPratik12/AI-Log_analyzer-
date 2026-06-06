@@ -33,10 +33,8 @@ variable "lambda_function_name" {
 
 variable "log_groups_to_monitor" {
   type        = list(string)
-  description = "CloudWatch Log Groups to attach subscription filters to"
-  default     = [
-    "/aws/lambda/ai-log-analyzer",
-  ]
+  description = "CloudWatch Log Groups to attach subscription filters to (must NOT be the analyzer's own log group)"
+  default     = []
 }
 
 variable "subscription_filter_pattern" {
