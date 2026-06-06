@@ -141,7 +141,6 @@ jobs:
         working-directory: terraform
         run: |
           terraform plan \
-            -var="tf_state_bucket=${{ secrets.TF_STATE_BUCKET }}" \
             -out=tfplan \
             -no-color
         env:

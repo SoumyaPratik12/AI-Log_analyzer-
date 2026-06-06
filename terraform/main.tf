@@ -7,11 +7,11 @@ terraform {
     }
   }
   backend "s3" {
-    bucket         = var.tf_state_bucket
+    bucket         = "loganalyzer-tf-state"
     key            = "ai-log-analyzer/terraform.tfstate"
     region         = "ap-south-1"
     encrypt        = true
-    dynamodb_table = var.tf_lock_table
+    dynamodb_table = "terraform-locks"
   }
 }
 
@@ -24,17 +24,6 @@ provider "aws" {
 variable "aws_region" {
   type    = string
   default = "ap-south-1"
-}
-
-variable "tf_state_bucket" {
-  type        = string
-  description = "S3 bucket for Terraform state"
-}
-
-variable "tf_lock_table" {
-  type        = string
-  description = "DynamoDB table for state locking"
-  default     = "terraform-locks"
 }
 
 variable "lambda_function_name" {
