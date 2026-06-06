@@ -34,7 +34,9 @@ variable "lambda_function_name" {
 variable "log_groups_to_monitor" {
   type        = list(string)
   description = "CloudWatch Log Groups to attach subscription filters to"
-  default     = []
+  default     = [
+    "/aws/lambda/ai-log-analyzer",
+  ]
 }
 
 variable "subscription_filter_pattern" {
@@ -60,7 +62,7 @@ variable "environment" {
 variable "alert_email" {
   type        = string
   description = "Email address to subscribe to the alert SNS topic (leave empty to skip)"
-  default     = ""
+  default     = "soumya.pratik2@gmail.com"
 }
 
 # ── Data sources ─────────────────────────────────────────────────────────────
