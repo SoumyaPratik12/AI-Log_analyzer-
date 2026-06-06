@@ -314,24 +314,28 @@ class TestClaudeClient:
         assert result["error_patterns"] == ["N/A"]
 
     @patch("src.utils.claude_client._resolve_api_key", return_value="test-key")
-    @patch("anthropic.Anthropic")
-    def test_analyze_logs_success(self, mock_anthropic_cls, mock_resolve):
+    def test_analyze_logs_success(self, mock_resolve):
+        import sys
+        import unittest.mock as um
+
         import src.utils.claude_client as cc
         from src.utils.claude_client import analyze_logs
 
         cc._api_key_cache = None
 
-        mock_client = MagicMock()
-        mock_anthropic_cls.return_value = mock_client
-        mock_message = MagicMock()
-        mock_message.content = [MagicMock(text=json.dumps(MOCK_ANALYSIS))]
-        mock_message.stop_reason = "end_turn"
-        mock_message.usage.output_tokens = 200
-        mock_client.messages.create.return_value = mock_message
+        mock_genai = MagicMock()
+        mock_model = MagicMock()
+        mock_genai.GenerativeModel.return_value = mock_model
+        mock_response = MagicMock()
+        mock_response.text = json.dumps(MOCK_ANALYSIS)
+        mock_response.candidates = [MagicMock(finish_reason="STOP")]
+        mock_model.generate_content.return_value = mock_response
 
-        result = analyze_logs("system", "user")
+        with um.patch.dict(sys.modules, {"google.generativeai": mock_genai}):
+            result = analyze_logs("system", "user")
+
         assert result["severity"] == "HIGH"
-        mock_client.messages.create.assert_called_once()
+        mock_model.generate_content.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
