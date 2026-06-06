@@ -68,6 +68,12 @@ variable "environment" {
   default = "production"
 }
 
+variable "alert_email" {
+  type        = string
+  description = "Email address to subscribe to the alert SNS topic (leave empty to skip)"
+  default     = ""
+}
+
 # ── Data sources ─────────────────────────────────────────────────────────────
 
 data "aws_caller_identity" "current" {}
@@ -77,16 +83,6 @@ data "aws_caller_identity" "current" {}
 resource "aws_ssm_parameter" "claude_api_key" {
   name        = "/${var.environment}/ai-log-analyzer/claude-api-key"
   description = "Anthropic Claude API key for AI Log Analyzer"
-  type        = "SecureString"
-  value       = "REPLACE_ME_AFTER_DEPLOY"
-  lifecycle {
-    ignore_changes = [value]
-  }
-}
-
-resource "aws_ssm_parameter" "telegram_bot_token" {
-  name        = "/${var.environment}/ai-log-analyzer/telegram-bot-token"
-  description = "Telegram Bot Token for alert notifications"
   type        = "SecureString"
   value       = "REPLACE_ME_AFTER_DEPLOY"
   lifecycle {
@@ -158,9 +154,17 @@ data "aws_iam_policy_document" "lambda_permissions" {
     ]
     resources = [
       aws_ssm_parameter.claude_api_key.arn,
-      aws_ssm_parameter.telegram_bot_token.arn,
       aws_ssm_parameter.slack_webhook_url.arn,
     ]
+  }
+
+  statement {
+    sid    = "SNSPublish"
+    effect = "Allow"
+    actions = [
+      "sns:Publish",
+    ]
+    resources = [aws_sns_topic.alerts.arn]
   }
 
   statement {
@@ -200,13 +204,12 @@ resource "aws_lambda_function" "analyzer" {
 
   environment {
     variables = {
-      CLAUDE_API_KEY_SSM_PATH       = aws_ssm_parameter.claude_api_key.name
-      TELEGRAM_BOT_TOKEN_SSM_PATH   = aws_ssm_parameter.telegram_bot_token.name
-      SLACK_WEBHOOK_URL_SSM_PATH    = aws_ssm_parameter.slack_webhook_url.name
-      TELEGRAM_CHAT_ID              = ""  # Override via GitHub Actions secret
-      AWS_REGION                    = var.aws_region
-      LOG_LEVEL                     = "INFO"
-      ENVIRONMENT                   = var.environment
+      CLAUDE_API_KEY_SSM_PATH    = aws_ssm_parameter.claude_api_key.name
+      SLACK_WEBHOOK_URL_SSM_PATH = aws_ssm_parameter.slack_webhook_url.name
+      ALERT_SNS_TOPIC_ARN        = aws_sns_topic.alerts.arn
+      AWS_REGION                 = var.aws_region
+      LOG_LEVEL                  = "INFO"
+      ENVIRONMENT                = var.environment
     }
   }
 
@@ -216,6 +219,20 @@ resource "aws_lambda_function" "analyzer" {
   ]
 
   tags = local.common_tags
+}
+
+# ── SNS Topic (outbound alerts — email/SMS subscribers) ──────────────────────
+
+resource "aws_sns_topic" "alerts" {
+  name = "${var.lambda_function_name}-alert-notifications"
+  tags = local.common_tags
+}
+
+resource "aws_sns_topic_subscription" "alert_email" {
+  count     = var.alert_email != "" ? 1 : 0
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
 }
 
 # ── SNS Topic (CloudWatch Alarm notifications) ────────────────────────────────
@@ -311,8 +328,9 @@ output "ssm_claude_api_key_path" {
   value = aws_ssm_parameter.claude_api_key.name
 }
 
-output "ssm_telegram_token_path" {
-  value = aws_ssm_parameter.telegram_bot_token.name
+output "alert_sns_topic_arn" {
+  value       = aws_sns_topic.alerts.arn
+  description = "SNS topic ARN for alert notifications — subscribe email/SMS addresses here"
 }
 
 output "ssm_slack_webhook_path" {

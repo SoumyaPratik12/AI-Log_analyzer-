@@ -340,25 +340,57 @@ class TestClaudeClient:
 
 
 class TestNotifier:
-    def test_telegram_message_format_critical(self):
-        from src.utils.notifier import _format_telegram_message
+    def test_sns_message_format_critical(self):
+        from src.utils.notifier import _format_sns_message
 
         analysis = dict(MOCK_ANALYSIS)
         analysis["severity"] = "CRITICAL"
-        msg = _format_telegram_message(analysis, "/aws/lambda/fn", "sns_alarm")
-        assert "🔴" in msg
-        assert "CRITICAL" in msg
-        assert "Root Cause" in msg
-        assert "/aws/lambda/fn" in msg
+        subject, body = _format_sns_message(analysis, "/aws/lambda/fn", "sns_alarm")
+        assert "🔴" in subject
+        assert "CRITICAL" in subject
+        assert "/aws/lambda/fn" in subject
+        assert "ROOT CAUSE" in body
+        assert len(subject) <= 100
 
-    def test_telegram_message_all_severities(self):
-        from src.utils.notifier import SEVERITY_EMOJI, _format_telegram_message
+    def test_sns_message_all_severities(self):
+        from src.utils.notifier import SEVERITY_EMOJI, _format_sns_message
 
         for sev, emoji in SEVERITY_EMOJI.items():
             analysis = dict(MOCK_ANALYSIS)
             analysis["severity"] = sev
-            msg = _format_telegram_message(analysis, "/test", "cwl_subscription")
-            assert emoji in msg
+            subject, body = _format_sns_message(analysis, "/test", "cwl_subscription")
+            assert emoji in subject
+            assert sev in subject
+
+    @patch("src.utils.notifier.boto3")
+    def test_send_sns_success(self, mock_boto3):
+        os.environ["ALERT_SNS_TOPIC_ARN"] = "arn:aws:sns:ap-south-1:123456789:alerts"
+        from src.utils.notifier import send_sns
+
+        mock_sns_client = MagicMock()
+        mock_boto3.client.return_value = mock_sns_client
+        result = send_sns(MOCK_ANALYSIS, "/test", "cwl_subscription")
+        assert result is True
+        mock_sns_client.publish.assert_called_once()
+        call_kwargs = mock_sns_client.publish.call_args[1]
+        assert "arn:aws:sns" in call_kwargs["TopicArn"]
+        assert "HIGH" in call_kwargs["Subject"]
+
+    def test_send_sns_missing_topic_arn_returns_false(self):
+        os.environ.pop("ALERT_SNS_TOPIC_ARN", None)
+        from src.utils.notifier import send_sns
+
+        result = send_sns(MOCK_ANALYSIS, "/test", "cwl_subscription")
+        assert result is False
+
+    @patch("src.utils.notifier.boto3")
+    def test_send_sns_boto3_error_returns_false(self, mock_boto3):
+        os.environ["ALERT_SNS_TOPIC_ARN"] = "arn:aws:sns:ap-south-1:123456789:alerts"
+        from src.utils.notifier import send_sns
+
+        mock_boto3.client.return_value.publish.side_effect = Exception("SNS unavailable")
+        result = send_sns(MOCK_ANALYSIS, "/test", "cwl_subscription")
+        assert result is False
 
     def test_slack_blocks_structure(self):
         from src.utils.notifier import _build_slack_blocks
@@ -382,27 +414,6 @@ class TestNotifier:
             analysis["severity"] = sev
             blocks = _build_slack_blocks(analysis, "/test", "cwl_subscription")
             assert blocks[0]["color"] == color
-
-    @patch("src.utils.notifier._get_ssm_value", return_value="fake-token")
-    @patch("src.utils.notifier._http_post")
-    def test_send_telegram_success(self, mock_post, mock_ssm):
-        os.environ["TELEGRAM_CHAT_ID"] = "-100123456"
-        from src.utils.notifier import send_telegram
-
-        mock_post.return_value = {"ok": True, "result": {"message_id": 1}}
-        result = send_telegram(MOCK_ANALYSIS, "/test", "cwl_subscription")
-        assert result is True
-        mock_post.assert_called_once()
-
-    @patch("src.utils.notifier._get_ssm_value", return_value="fake-token")
-    @patch("src.utils.notifier._http_post")
-    def test_send_telegram_api_error_returns_false(self, mock_post, mock_ssm):
-        os.environ["TELEGRAM_CHAT_ID"] = "-100123456"
-        from src.utils.notifier import send_telegram
-
-        mock_post.return_value = {"ok": False, "description": "Forbidden"}
-        result = send_telegram(MOCK_ANALYSIS, "/test", "cwl_subscription")
-        assert result is False
 
     @patch("src.utils.notifier._get_ssm_value", return_value="https://hooks.slack.com/fake")
     @patch("src.utils.notifier._http_post")
@@ -431,13 +442,13 @@ class TestHandler:
         return dict(MOCK_ANALYSIS)
 
     def _mock_send_notifications(self, *args, **kwargs):
-        return {"telegram": True, "slack": True}
+        return {"sns": True, "slack": True}
 
     @patch("src.handlers.log_analyzer.send_notifications")
     @patch("src.handlers.log_analyzer.analyze_logs")
     def test_handler_cwl_event(self, mock_analyze, mock_notify):
         mock_analyze.return_value = dict(MOCK_ANALYSIS)
-        mock_notify.return_value = {"telegram": True, "slack": True}
+        mock_notify.return_value = {"sns": True, "slack": True}
         from src.handlers.log_analyzer import handler
 
         response = handler(_cwl_subscription_event(), None)
@@ -450,7 +461,7 @@ class TestHandler:
     @patch("src.handlers.log_analyzer.analyze_logs")
     def test_handler_sns_event(self, mock_analyze, mock_notify):
         mock_analyze.return_value = dict(MOCK_ANALYSIS)
-        mock_notify.return_value = {"telegram": True, "slack": True}
+        mock_notify.return_value = {"sns": True, "slack": True}
         from src.handlers.log_analyzer import handler
 
         response = handler(_sns_alarm_event(), None)
@@ -462,7 +473,7 @@ class TestHandler:
     @patch("src.handlers.log_analyzer.analyze_logs")
     def test_handler_returns_207_on_partial_error(self, mock_analyze, mock_notify):
         mock_analyze.side_effect = RuntimeError("Claude unavailable")
-        mock_notify.return_value = {"telegram": False, "slack": False}
+        mock_notify.return_value = {"sns": False, "slack": False}
         from src.handlers.log_analyzer import handler
 
         response = handler(_cwl_subscription_event(), None)
@@ -480,10 +491,10 @@ class TestHandler:
     @patch("src.handlers.log_analyzer.analyze_logs")
     def test_handler_notification_results_in_response(self, mock_analyze, mock_notify):
         mock_analyze.return_value = dict(MOCK_ANALYSIS)
-        mock_notify.return_value = {"telegram": True, "slack": False}
+        mock_notify.return_value = {"sns": True, "slack": False}
         from src.handlers.log_analyzer import handler
 
         response = handler(_cwl_subscription_event(), None)
         notifs = response["results"][0]["notifications"]
-        assert notifs["telegram"] is True
+        assert notifs["sns"] is True
         assert notifs["slack"] is False

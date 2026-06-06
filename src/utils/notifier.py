@@ -1,6 +1,7 @@
 """
-Telegram and Slack notification formatters using only stdlib urllib.
-No third-party HTTP libraries required.
+SNS (email/SMS) and Slack notification formatters.
+SNS uses boto3 directly — no extra dependencies.
+Slack uses stdlib urllib only.
 """
 
 from __future__ import annotations
@@ -9,9 +10,10 @@ import json
 import logging
 import os
 import urllib.error
-import urllib.parse
 import urllib.request
 from typing import Any
+
+import boto3
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +31,7 @@ SEVERITY_COLOR = {
     "LOW": "#36A64F",
 }
 
-TELEGRAM_BOT_TOKEN_SSM = "TELEGRAM_BOT_TOKEN_SSM_PATH"
-TELEGRAM_CHAT_ID_ENV = "TELEGRAM_CHAT_ID"
+SNS_TOPIC_ARN_ENV = "ALERT_SNS_TOPIC_ARN"
 SLACK_WEBHOOK_SSM = "SLACK_WEBHOOK_URL_SSM_PATH"
 
 _ssm_cache: dict[str, str] = {}
@@ -42,8 +43,6 @@ def _get_ssm_value(ssm_path_env: str) -> str:
         raise OSError(f"Environment variable {ssm_path_env} is not set")
     if ssm_path in _ssm_cache:
         return _ssm_cache[ssm_path]
-
-    import boto3
 
     ssm = boto3.client("ssm", region_name=os.environ.get("AWS_REGION", "ap-south-1"))
     response = ssm.get_parameter(Name=ssm_path, WithDecryption=True)
@@ -73,7 +72,8 @@ def _http_post(url: str, payload: dict[str, Any]) -> dict[str, Any]:
         raise
 
 
-def _format_telegram_message(analysis: dict[str, Any], log_group: str, source: str) -> str:
+def _format_sns_message(analysis: dict[str, Any], log_group: str, source: str) -> tuple[str, str]:
+    """Returns (subject, body) for SNS publish."""
     severity = analysis.get("severity", "UNKNOWN")
     emoji = SEVERITY_EMOJI.get(severity, "⚪")
 
@@ -81,46 +81,40 @@ def _format_telegram_message(analysis: dict[str, Any], log_group: str, source: s
         f"  {i + 1}. {a}" for i, a in enumerate(analysis.get("recommended_actions", []))
     )
     components = ", ".join(analysis.get("affected_components", []))
-    patterns = "\n".join(f"  • {p}" for p in analysis.get("error_patterns", []))
-    anomalies = "\n".join(f"  • {a}" for a in analysis.get("anomalies", []))
+    patterns = "\n".join(f"  - {p}" for p in analysis.get("error_patterns", []))
+    anomalies = "\n".join(f"  - {a}" for a in analysis.get("anomalies", []))
 
-    return (
-        f"{emoji} <b>AI Log Analysis Alert</b> {emoji}\n\n"
-        f"<b>Severity:</b> {severity}\n"
-        f"<b>Source:</b> {source}\n"
-        f"<b>Log Group:</b> <code>{log_group}</code>\n\n"
-        f"<b>Summary:</b>\n{analysis.get('summary', 'N/A')}\n\n"
-        f"<b>Root Cause:</b>\n{analysis.get('root_cause', 'N/A')}\n\n"
-        f"<b>Affected Components:</b> {components}\n\n"
-        f"<b>Recommended Actions:</b>\n{actions}\n\n"
-        f"<b>Error Patterns:</b>\n{patterns}\n\n"
-        f"<b>Anomalies:</b>\n{anomalies}"
+    subject = f"{emoji} [{severity}] AI Log Alert: {log_group}"[:100]
+
+    body = (
+        f"{emoji} AI Log Analysis Alert\n"
+        f"{'=' * 50}\n\n"
+        f"Severity : {severity}\n"
+        f"Source   : {source}\n"
+        f"Log Group: {log_group}\n\n"
+        f"SUMMARY\n{analysis.get('summary', 'N/A')}\n\n"
+        f"ROOT CAUSE\n{analysis.get('root_cause', 'N/A')}\n\n"
+        f"AFFECTED COMPONENTS\n{components}\n\n"
+        f"RECOMMENDED ACTIONS\n{actions}\n\n"
+        f"ERROR PATTERNS\n{patterns}\n\n"
+        f"ANOMALIES\n{anomalies}"
     )
+    return subject, body
 
 
-def send_telegram(analysis: dict[str, Any], log_group: str, source: str) -> bool:
+def send_sns(analysis: dict[str, Any], log_group: str, source: str) -> bool:
     try:
-        bot_token = _get_ssm_value(TELEGRAM_BOT_TOKEN_SSM)
-        chat_id = os.environ.get(TELEGRAM_CHAT_ID_ENV)
-        if not chat_id:
-            raise OSError(f"{TELEGRAM_CHAT_ID_ENV} is not set")
+        topic_arn = os.environ.get(SNS_TOPIC_ARN_ENV)
+        if not topic_arn:
+            raise OSError(f"{SNS_TOPIC_ARN_ENV} is not set")
 
-        message = _format_telegram_message(analysis, log_group, source)
-        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        payload = {
-            "chat_id": chat_id,
-            "text": message,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        }
-        result = _http_post(url, payload)
-        if result.get("ok"):
-            logger.info("Telegram notification sent successfully")
-            return True
-        logger.error("Telegram API returned ok=false: %s", result)
-        return False
+        subject, body = _format_sns_message(analysis, log_group, source)
+        sns = boto3.client("sns", region_name=os.environ.get("AWS_REGION", "ap-south-1"))
+        sns.publish(TopicArn=topic_arn, Subject=subject, Message=body)
+        logger.info("SNS notification sent to %s", topic_arn)
+        return True
     except Exception as e:
-        logger.error("Failed to send Telegram notification: %s", e)
+        logger.error("Failed to send SNS notification: %s", e)
         return False
 
 
@@ -210,7 +204,7 @@ def send_slack(analysis: dict[str, Any], log_group: str, source: str) -> bool:
 
 def send_notifications(analysis: dict[str, Any], log_group: str, source: str) -> dict[str, bool]:
     results = {
-        "telegram": send_telegram(analysis, log_group, source),
+        "sns": send_sns(analysis, log_group, source),
         "slack": send_slack(analysis, log_group, source),
     }
     logger.info("Notification results: %s", results)
