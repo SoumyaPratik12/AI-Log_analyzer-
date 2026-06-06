@@ -194,7 +194,7 @@ jobs:
 
       - name: Terraform Force Unlock (clear stale lock)
         working-directory: terraform
-        run: terraform force-unlock -force da7bd637-7488-7c8a-a14f-660b00495b9c || true
+        run: terraform force-unlock -force da7bd637-7488-7c8a-a14f-660b00495b9c 2>/dev/null || true
 
       - name: Terraform Apply
         working-directory: terraform
