@@ -192,6 +192,10 @@ jobs:
         working-directory: terraform
         run: terraform init
 
+      - name: Terraform Force Unlock (clear stale lock)
+        working-directory: terraform
+        run: terraform force-unlock -force da7bd637-7488-7c8a-a14f-660b00495b9c || true
+
       - name: Terraform Apply
         working-directory: terraform
         run: terraform apply -auto-approve tfplan
