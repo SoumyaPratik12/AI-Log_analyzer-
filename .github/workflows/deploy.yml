@@ -81,7 +81,7 @@ jobs:
       - name: Build Lambda Layer (dependencies)
         run: |
           mkdir -p layer/python
-          pip install -r requirements.txt -t layer/python --no-deps --upgrade
+          pip install -r requirements.txt -t layer/python --upgrade
           cd layer && zip -r ../layer.zip python/
           echo "Layer size: $(du -sh ../layer.zip | cut -f1)"
 
