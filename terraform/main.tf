@@ -212,7 +212,6 @@ resource "aws_lambda_function" "analyzer" {
       GEMINI_API_KEY_SSM_PATH    = aws_ssm_parameter.gemini_api_key.name
       SLACK_WEBHOOK_URL_SSM_PATH = aws_ssm_parameter.slack_webhook_url.name
       ALERT_SNS_TOPIC_ARN        = aws_sns_topic.alerts.arn
-      AWS_REGION                 = var.aws_region
       LOG_LEVEL                  = "INFO"
       ENVIRONMENT                = var.environment
     }
