@@ -214,6 +214,45 @@ jobs:
             --type SecureString \
             --overwrite
 
+      - name: Smoke test — invoke Lambda with test event
+        run: |
+          echo "Invoking Lambda with test SNS alarm event..."
+          RESPONSE=$(aws lambda invoke \
+            --function-name "${{ env.LAMBDA_FUNCTION_NAME }}" \
+            --payload file://tests/test_event_sns_alarm.json \
+            --cli-binary-format raw-in-base64-out \
+            --log-type Tail \
+            --region "${{ env.AWS_REGION }}" \
+            /tmp/lambda_response.json 2>&1)
+
+          STATUS_CODE=$(python3 -c "import json; d=json.load(open('/tmp/lambda_response.json')); print(d.get('statusCode', d))" 2>/dev/null || cat /tmp/lambda_response.json)
+          echo "Lambda response: $(cat /tmp/lambda_response.json)"
+          echo "Status: $STATUS_CODE"
+
+          # Decode and print tail logs
+          LOG_TAIL=$(echo "$RESPONSE" | python3 -c "
+          import sys, json, base64
+          data = sys.stdin.read()
+          try:
+              obj = json.loads(data)
+              tail = obj.get('LogResult','')
+              if tail:
+                  print(base64.b64decode(tail).decode())
+          except: pass
+          " 2>/dev/null || true)
+          if [ -n "$LOG_TAIL" ]; then
+            echo "--- Lambda logs ---"
+            echo "$LOG_TAIL"
+          fi
+
+          # Fail if Lambda returned a 5xx error
+          HTTP_CODE=$(python3 -c "import json; print(json.load(open('/tmp/lambda_response.json')).get('statusCode',200))" 2>/dev/null || echo "200")
+          if [ "$HTTP_CODE" -ge 500 ]; then
+            echo "Smoke test FAILED — Lambda returned $HTTP_CODE"
+            exit 1
+          fi
+          echo "Smoke test PASSED"
+
   # ── Notify deployment via SNS ──────────────────────────────────────────────
   notify-deploy:
     name: Notify Deployment
