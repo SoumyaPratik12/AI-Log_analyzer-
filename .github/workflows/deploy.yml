@@ -273,11 +273,8 @@ jobs:
             MSG="Deployment FAILED"
           fi
 
+          MESSAGE="Status: ${MSG}\nBranch: ${{ github.ref_name }}\nCommit: ${{ github.sha }}\nAuthor: ${{ github.actor }}\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           aws sns publish \
             --topic-arn "${{ secrets.ALERT_SNS_TOPIC_ARN }}" \
             --subject "${EMOJI} AI Log Analyzer — ${MSG}" \
-            --message "Status: ${MSG}
-Branch: ${{ github.ref_name }}
-Commit: ${{ github.sha }}
-Author: ${{ github.actor }}
-Run:    ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            --message "$MESSAGE"
