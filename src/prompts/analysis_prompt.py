@@ -1,4 +1,4 @@
-"""Prompt builder for Claude log analysis. Caps at 150 log lines."""
+"""Prompt builder for Gemini log analysis. Caps at 150 log lines."""
 
 from __future__ import annotations
 

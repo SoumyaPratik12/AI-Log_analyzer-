@@ -1,6 +1,6 @@
 """
-Claude API client with SSM secret resolution.
-Env var CLAUDE_API_KEY_SSM_PATH holds the SSM parameter path; the raw key is never stored in env.
+Gemini API client with SSM secret resolution.
+Env var GEMINI_API_KEY_SSM_PATH holds the SSM parameter path; the raw key is never stored in env.
 """
 
 from __future__ import annotations
@@ -11,14 +11,13 @@ import os
 import re
 from typing import Any
 
-import anthropic
 import boto3
 
 logger = logging.getLogger(__name__)
 
-MODEL_ID = "claude-opus-4-5"
+MODEL_ID = "gemini-2.0-flash"
 MAX_TOKENS = 1024
-SSM_PATH_ENV = "CLAUDE_API_KEY_SSM_PATH"
+SSM_PATH_ENV = "GEMINI_API_KEY_SSM_PATH"
 _api_key_cache: str | None = None
 
 
@@ -34,7 +33,7 @@ def _resolve_api_key() -> str:
     ssm = boto3.client("ssm", region_name=os.environ.get("AWS_REGION", "ap-south-1"))
     response = ssm.get_parameter(Name=ssm_path, WithDecryption=True)
     _api_key_cache = response["Parameter"]["Value"]
-    logger.info("Resolved Claude API key from SSM path: %s", ssm_path)
+    logger.info("Resolved Gemini API key from SSM path: %s", ssm_path)
     return _api_key_cache
 
 
@@ -51,7 +50,7 @@ def _extract_json(text: str) -> dict[str, Any]:
         match = re.search(r"\{[\s\S]*\}", text)
         if match:
             return json.loads(match.group())
-        raise ValueError(f"No valid JSON found in Claude response: {text[:200]}") from None
+        raise ValueError(f"No valid JSON found in Gemini response: {text[:200]}") from None
 
 
 def _validate_analysis(data: dict[str, Any]) -> dict[str, Any]:
@@ -66,7 +65,7 @@ def _validate_analysis(data: dict[str, Any]) -> dict[str, Any]:
     }
     missing = required_keys - set(data.keys())
     if missing:
-        raise ValueError(f"Claude response missing required keys: {missing}")
+        raise ValueError(f"Gemini response missing required keys: {missing}")
 
     valid_severities = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
     if data["severity"] not in valid_severities:
@@ -83,23 +82,21 @@ def _validate_analysis(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def analyze_logs(system_prompt: str, user_prompt: str) -> dict[str, Any]:
+    import google.generativeai as genai  # lazy import — not in requirements-dev.txt
+
     api_key = _resolve_api_key()
-    client = anthropic.Anthropic(api_key=api_key)
+    genai.configure(api_key=api_key)
 
-    logger.info("Sending log analysis request to Claude (%s)", MODEL_ID)
-    message = client.messages.create(
-        model=MODEL_ID,
-        max_tokens=MAX_TOKENS,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_prompt}],
+    logger.info("Sending log analysis request to Gemini (%s)", MODEL_ID)
+    model = genai.GenerativeModel(
+        model_name=MODEL_ID,
+        system_instruction=system_prompt,
+        generation_config=genai.GenerationConfig(max_output_tokens=MAX_TOKENS),
     )
+    response = model.generate_content(user_prompt)
+    raw_text = response.text
 
-    raw_text = message.content[0].text
-    logger.info(
-        "Claude response received, stop_reason=%s, tokens=%d",
-        message.stop_reason,
-        message.usage.output_tokens,
-    )
+    logger.info("Gemini response received, length=%d chars", len(raw_text))
 
     data = _extract_json(raw_text)
     return _validate_analysis(data)

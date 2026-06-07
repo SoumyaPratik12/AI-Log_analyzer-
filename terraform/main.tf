@@ -69,9 +69,9 @@ data "aws_caller_identity" "current" {}
 
 # ── SSM Parameters ───────────────────────────────────────────────────────────
 
-resource "aws_ssm_parameter" "claude_api_key" {
-  name        = "/${var.environment}/ai-log-analyzer/claude-api-key"
-  description = "Anthropic Claude API key for AI Log Analyzer"
+resource "aws_ssm_parameter" "gemini_api_key" {
+  name        = "/${var.environment}/ai-log-analyzer/gemini-api-key"
+  description = "Google Gemini API key for AI Log Analyzer"
   type        = "SecureString"
   value       = "REPLACE_ME_AFTER_DEPLOY"
   lifecycle {
@@ -94,7 +94,7 @@ resource "aws_ssm_parameter" "slack_webhook_url" {
 resource "aws_lambda_layer_version" "dependencies" {
   filename            = "${path.module}/../layer.zip"
   layer_name          = "${var.lambda_function_name}-dependencies"
-  description         = "anthropic and boto3 for AI Log Analyzer"
+  description         = "google-generativeai and boto3 for AI Log Analyzer"
   compatible_runtimes = ["python3.12"]
   source_code_hash    = filebase64sha256("${path.module}/../layer.zip")
 
@@ -142,7 +142,7 @@ data "aws_iam_policy_document" "lambda_permissions" {
       "ssm:GetParameters",
     ]
     resources = [
-      aws_ssm_parameter.claude_api_key.arn,
+      aws_ssm_parameter.gemini_api_key.arn,
       aws_ssm_parameter.slack_webhook_url.arn,
     ]
   }
@@ -193,7 +193,7 @@ resource "aws_lambda_function" "analyzer" {
 
   environment {
     variables = {
-      CLAUDE_API_KEY_SSM_PATH    = aws_ssm_parameter.claude_api_key.name
+      GEMINI_API_KEY_SSM_PATH    = aws_ssm_parameter.gemini_api_key.name
       SLACK_WEBHOOK_URL_SSM_PATH = aws_ssm_parameter.slack_webhook_url.name
       ALERT_SNS_TOPIC_ARN        = aws_sns_topic.alerts.arn
       AWS_REGION                 = var.aws_region
@@ -313,8 +313,8 @@ output "sns_topic_arn" {
   value = aws_sns_topic.alarms.arn
 }
 
-output "ssm_claude_api_key_path" {
-  value = aws_ssm_parameter.claude_api_key.name
+output "ssm_gemini_api_key_path" {
+  value = aws_ssm_parameter.gemini_api_key.name
 }
 
 output "alert_sns_topic_arn" {

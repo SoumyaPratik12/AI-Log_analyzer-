@@ -202,8 +202,8 @@ jobs:
       - name: Populate SSM secrets
         run: |
           aws ssm put-parameter \
-            --name "/production/ai-log-analyzer/claude-api-key" \
-            --value "${{ secrets.CLAUDE_API_KEY }}" \
+            --name "/production/ai-log-analyzer/gemini-api-key" \
+            --value "${{ secrets.GEMINI_API_KEY }}" \
             --type SecureString \
             --overwrite
 
