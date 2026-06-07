@@ -1,0 +1,19 @@
+# Copy to terraform.tfvars and fill in real values before running terraform apply.
+
+aws_region           = "ap-south-1"
+environment          = "production"
+lambda_function_name = "ai-log-analyzer"
+
+# Replace REPLACE_API_ID with your actual REST API Gateway ID.
+# Find it: AWS Console → API Gateway → select your API → the ID is in the URL bar
+# e.g. https://console.aws.amazon.com/apigateway/home#/apis/abc123def4/...  → ID is abc123def4
+log_groups_to_monitor = [
+  "API-Gateway-Execution-Logs_REPLACE_API_ID/prod",
+  "API-Gateway-Execution-Logs_REPLACE_API_ID/dev",
+]
+
+# Subscription filter — matches ERROR, Exception, CRITICAL, or fatal log lines
+subscription_filter_pattern = "?ERROR ?Exception ?CRITICAL ?fatal"
+
+# Optional: email address to subscribe to alert SNS topic
+alert_email = "soumya.pratik2@gmail.com"
