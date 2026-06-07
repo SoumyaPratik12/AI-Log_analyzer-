@@ -34,12 +34,10 @@ variable "lambda_function_name" {
 variable "log_groups_to_monitor" {
   type        = list(string)
   description = "CloudWatch Log Groups to attach subscription filters to"
-  # API Gateway execution logs — replace REPLACE_API_ID with your REST API ID (e.g. abc123def)
-  # Find it: AWS Console → API Gateway → APIs → your API → copy the ID from the URL
-  default = [
-    "API-Gateway-Execution-Logs_REPLACE_API_ID/prod",
-    "API-Gateway-Execution-Logs_REPLACE_API_ID/dev",
-  ]
+  # Set to real log group names once you have an API Gateway.
+  # Example: ["API-Gateway-Execution-Logs_abc1def234/prod"]
+  # Find your API ID: AWS Console → API Gateway → APIs → copy the ID from the URL
+  default = []
 }
 
 variable "subscription_filter_pattern" {
