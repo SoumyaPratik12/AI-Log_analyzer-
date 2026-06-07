@@ -121,9 +121,6 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: lambda-layer
-      - uses: actions/download-artifact@v4
-        with:
           name: lambda-function
 
       - name: Setup Terraform
@@ -170,9 +167,6 @@ jobs:
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
-        with:
-          name: lambda-layer
-      - uses: actions/download-artifact@v4
         with:
           name: lambda-function
       - uses: actions/download-artifact@v4
