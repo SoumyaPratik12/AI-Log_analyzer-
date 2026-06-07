@@ -1,0 +1,11 @@
+{
+  "Records": [
+    {
+      "EventSource": "aws:sns",
+      "Sns": {
+        "Subject": "ALARM: ai-log-analyzer-high-error-rate",
+        "Message": "{\"AlarmName\":\"ai-log-analyzer-high-error-rate\",\"AlarmDescription\":\"Lambda error rate exceeded threshold\",\"NewStateValue\":\"ALARM\",\"NewStateReason\":\"Threshold Crossed: 2 datapoints were greater than the threshold (10.0)\",\"StateChangeTime\":\"2024-01-01T12:00:00.000+0000\",\"Region\":\"ap-south-1\",\"Trigger\":{\"MetricName\":\"Errors\",\"Namespace\":\"AWS/Lambda\",\"Dimensions\":[{\"name\":\"FunctionName\",\"value\":\"my-test-app\"}],\"Period\":60,\"EvaluationPeriods\":2,\"Threshold\":10.0,\"ComparisonOperator\":\"GreaterThanThreshold\"}}"
+      }
+    }
+  ]
+}

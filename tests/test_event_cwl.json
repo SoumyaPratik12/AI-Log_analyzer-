@@ -1,0 +1,10 @@
+{
+  "Records": [
+    {
+      "EventSource": "aws:sns",
+      "Sns": {
+        "Message": "{\"logEvents\":[{\"id\":\"evt1\",\"timestamp\":1700000000000,\"message\":\"ERROR [app] NullPointerException at com.example.Service.process(Service.java:42)\"},{\"id\":\"evt2\",\"timestamp\":1700000001000,\"message\":\"ERROR [app] Failed to connect to database after 3 retries\"},{\"id\":\"evt3\",\"timestamp\":1700000002000,\"message\":\"CRITICAL [app] Service is down — health check failed\"},{\"id\":\"evt4\",\"timestamp\":1700000003000,\"message\":\"INFO [app] Attempting graceful shutdown\"}],\"logGroup\":\"/aws/lambda/my-test-app\",\"logStream\":\"2024/01/01/[$LATEST]abc123\",\"subscriptionFilters\":[\"ai-log-analyzer-filter-0\"],\"messageType\":\"DATA_MESSAGE\",\"owner\":\"748189524661\"}"
+      }
+    }
+  ]
+}

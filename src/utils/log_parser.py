@@ -92,6 +92,27 @@ def parse_sns_alarm(record: dict[str, Any]) -> ParsedEvent:
     )
 
 
+def parse_cwl_sns(record: dict[str, Any]) -> ParsedEvent:
+    """Parse a CWL log payload delivered wrapped inside an SNS message."""
+    cwl_data = json.loads(record["Sns"]["Message"])
+    log_group = cwl_data.get("logGroup", "unknown")
+    log_stream = cwl_data.get("logStream", "unknown")
+    all_lines = _extract_cwl_lines(cwl_data)
+    prioritized = _prioritize_lines(all_lines)
+    return ParsedEvent(
+        source="cwl_subscription",
+        log_group=log_group,
+        log_stream=log_stream,
+        log_lines=prioritized,
+        raw_message=json.dumps(cwl_data, indent=2),
+        metadata={
+            "subscription_filters": cwl_data.get("subscriptionFilters", []),
+            "total_events": len(all_lines),
+            "error_events": len([ln for ln in all_lines if ERROR_PATTERN.search(ln)]),
+        },
+    )
+
+
 def parse_cwl_subscription(record: dict[str, Any]) -> ParsedEvent:
     cwl_data = _decode_cwl_data(record["awslogs"]["data"])
     log_group = cwl_data.get("logGroup", "unknown")
@@ -112,12 +133,21 @@ def parse_cwl_subscription(record: dict[str, Any]) -> ParsedEvent:
     )
 
 
+def _is_cwl_sns_message(record: dict[str, Any]) -> bool:
+    """Return True when an SNS record's Message body is a CWL log payload."""
+    try:
+        body = json.loads(record["Sns"]["Message"])
+        return "logEvents" in body and "logGroup" in body
+    except Exception:
+        return False
+
+
 def detect_event_type(event: dict[str, Any]) -> str:
     records = event.get("Records", [])
     if records:
         first = records[0]
         if "Sns" in first:
-            return "sns_alarm"
+            return "cwl_subscription" if _is_cwl_sns_message(first) else "sns_alarm"
         if "awslogs" in first:
             return "cwl_subscription"
     if "awslogs" in event:
@@ -132,6 +162,10 @@ def parse_event(event: dict[str, Any]) -> list[ParsedEvent]:
     if event_type == "sns_alarm":
         for record in event.get("Records", []):
             parsed.append(parse_sns_alarm(record))
+
+    elif event_type == "cwl_subscription" and event.get("Records", [{}])[0].get("Sns"):
+        for record in event.get("Records", []):
+            parsed.append(parse_cwl_sns(record))
 
     elif event_type in ("cwl_subscription", "cwl_direct"):
         records = event.get("Records", [event]) if event_type == "cwl_subscription" else [event]

@@ -52,7 +52,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         parsed_events = parse_event(event)
     except Exception as e:
         logger.error("Failed to parse event: %s", e, exc_info=True)
-        return {"statusCode": 400, "error": str(e)}
+        return {"statusCode": 400, "results": [], "errors": [{"error": str(e)}]}
 
     if not parsed_events:
         logger.warning("No parseable events found in input")
