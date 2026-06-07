@@ -96,12 +96,23 @@ resource "aws_ssm_parameter" "slack_webhook_url" {
 
 # ── Lambda Layer (dependencies) ───────────────────────────────────────────────
 
+variable "layer_s3_bucket" {
+  type        = string
+  description = "S3 bucket used to stage the Lambda layer zip (avoids 67 MB direct-upload limit)"
+  default     = "loganalyzer-tf-state"
+}
+
+variable "layer_s3_key" {
+  type    = string
+  default = "lambda-layers/ai-log-analyzer-dependencies.zip"
+}
+
 resource "aws_lambda_layer_version" "dependencies" {
-  filename            = "${path.module}/../layer.zip"
-  layer_name          = "${var.lambda_function_name}-dependencies"
-  description         = "google-generativeai and boto3 for AI Log Analyzer"
+  s3_bucket         = var.layer_s3_bucket
+  s3_key            = var.layer_s3_key
+  layer_name        = "${var.lambda_function_name}-dependencies"
+  description       = "google-generativeai and boto3 for AI Log Analyzer"
   compatible_runtimes = ["python3.12"]
-  source_code_hash    = filebase64sha256("${path.module}/../layer.zip")
 
   lifecycle {
     create_before_destroy = true

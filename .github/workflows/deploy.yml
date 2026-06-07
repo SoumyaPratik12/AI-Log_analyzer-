@@ -90,12 +90,17 @@ jobs:
           zip -r function.zip src/ --exclude "*.pyc" --exclude "*/__pycache__/*"
           echo "Function size: $(du -sh function.zip | cut -f1)"
 
-      - name: Upload Layer artifact
-        uses: actions/upload-artifact@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          name: lambda-layer
-          path: layer.zip
-          retention-days: 1
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload layer.zip to S3 (avoids 67 MB direct-upload limit)
+        run: |
+          aws s3 cp layer.zip s3://loganalyzer-tf-state/lambda-layers/ai-log-analyzer-dependencies.zip
+          echo "Layer uploaded to S3"
 
       - name: Upload Function artifact
         uses: actions/upload-artifact@v4
